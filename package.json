@@ -1,0 +1,24 @@
+{
+  "name": "8ball",
+  "version": "0.1.0",
+  "description": "Multiplayer 8-ball pool — one link brings your opponent to the table.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test",
+    "check": "node scripts/check-syntax.mjs && node --test",
+    "deploy": "bash scripts/deploy.sh"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.1"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
