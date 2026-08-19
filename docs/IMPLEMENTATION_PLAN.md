@@ -13,7 +13,7 @@ Executed by Claude Code on the DarksGames production box. Authoring repo: `/root
 | M4 | Public lobby, spectators, timer, rematch | [x] |
 | M5 | dg-accounts sign-in, ELO stats, polish | [x] (live-domain sign-in verified at M6) |
 | M6 | Deploy to 8ball.darksgames.app | [x] :3025, cert to 2026-11-17, live wss smoke PASS (human 2-device playtest owed) |
-| M7 | Game Card on darksgames.app, launch | [ ] |
+| M7 | Game Card on darksgames.app, launch | [x] live at dg-v23, tagged v1.0.0 |
 
 ## Ground rules
 
