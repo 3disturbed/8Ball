@@ -26,7 +26,11 @@ export class Controller {
     this.guideMode = 'full';
     this.effects = { pocketFlashes: [] };
     this.banner = null;
+    this.callRequired = false;     // rules demand a called pocket this turn
+    this.calledPocket = null;
+    this.opponentAim = null;       // live cue preview for AI/opponent turns
     this.onEvent = null;           // sim event hook (sounds/haptics, M2+)
+    this.onStrike = null;          // cue-hits-ball hook (sound)
     this.onSettled = null;         // shot finished hook
     this.seq = 0;
     this._acc = 0;
@@ -82,6 +86,11 @@ export class Controller {
 
   takeShot() {
     if (!this.canAim() || this.aim.power <= 0.03) { this.aim.power = 0; return; }
+    if (this.callRequired && this.calledPocket === null) {
+      this.aim.power = 0;
+      this.showBanner('Tap a pocket to call it first');
+      return;
+    }
     const place = this.phase === 'ballInHand' ? { x: this.pendingPlace.x, y: this.pendingPlace.y } : null;
     const input = {
       shotId: crypto.randomUUID(),
@@ -93,7 +102,7 @@ export class Controller {
         oy: Math.max(-TIP_MAX, Math.min(TIP_MAX, Math.round(this.aim.tip.oy))),
       },
       place,
-      calledPocket: null,
+      calledPocket: this.calledPocket,
     };
     this._pendingInput = input;
     this.phase = 'striking';
@@ -119,6 +128,7 @@ export class Controller {
     if (this.phase === 'striking') {
       this._strikeT += dtFrame * 1000;
       if (this._strikeT >= STRIKE_MS) {
+        if (this.onStrike) this.onStrike(this._pendingInput.power / 1000);
         beginShot(this.balls, this._pendingInput, { isBreak: this.isBreak });
         this._events = [];
         this._eventCursor = 0;
@@ -155,6 +165,8 @@ export class Controller {
     this.aim.power = 0;
     this.aim.tip = { ox: 0, oy: 0 };
     this.pendingPlace = null;
+    this.calledPocket = null;
+    this.callRequired = false;
     this.isBreak = false;
     this.phase = 'idle';
     this.transport.onLocalSettle({
@@ -194,7 +206,15 @@ export class Controller {
 
   viewState() {
     const cue = this.cueBall();
-    const state = { balls: this.balls, effects: this.effects, banner: this.banner };
+    const state = {
+      balls: this.balls,
+      effects: this.effects,
+      banner: this.banner,
+      calledPocket: this.calledPocket,
+    };
+    if (this.phase === 'watching' && this.opponentAim) {
+      state.cue = this.opponentAim;
+    }
 
     const aimPhase = this.phase === 'aim'
       || (this.phase === 'ballInHand' && this.pendingPlace?.legal);

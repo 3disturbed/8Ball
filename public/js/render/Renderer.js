@@ -147,6 +147,19 @@ export class Renderer {
       ctx.fill();
     }
 
+    // Called pocket marker
+    if (state.calledPocket !== null && state.calledPocket !== undefined) {
+      const p = TABLE.pockets[state.calledPocket];
+      const [px, py] = this.toScreen(p.x, p.y);
+      ctx.beginPath();
+      ctx.arc(px, py, p.r * this.scale * 1.25, 0, 7);
+      ctx.strokeStyle = 'rgba(232,193,90,0.9)';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([5, 5]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     // Pocket flash effects
     if (state.effects) {
       for (const fx2 of state.effects.pocketFlashes) {

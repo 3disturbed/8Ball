@@ -3,11 +3,22 @@
 // naturally scales with distance (the Miniclip trick). Also owns ball-in-hand
 // placement dragging. Arrow keys nudge on desktop.
 
+import { TABLE } from '/shared/physics/Collisions.js';
+
 export function attachAim(canvas, controller, renderer) {
   let dragging = false;
   let placing = false;
   let lastAngle = 0;
   let pointerId = null;
+
+  function pocketNear(wx, wy) {
+    for (const p of TABLE.pockets) {
+      const dx = wx - p.x;
+      const dy = wy - p.y;
+      if (dx * dx + dy * dy < 0.09 * 0.09) return p;
+    }
+    return null;
+  }
 
   function worldPos(e) {
     const rect = canvas.getBoundingClientRect();
@@ -30,6 +41,13 @@ export function attachAim(canvas, controller, renderer) {
       return;
     }
     if (!controller.canAim()) return;
+    if (controller.callRequired) {
+      const p = pocketNear(wx, wy);
+      if (p) {
+        controller.calledPocket = controller.calledPocket === p.id ? null : p.id;
+        return;
+      }
+    }
     const cue = controller.phase === 'ballInHand' ? controller.pendingPlace : controller.cueBall();
     if (!cue) return;
     pointerId = e.pointerId;

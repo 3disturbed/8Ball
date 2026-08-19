@@ -6,9 +6,9 @@ Executed by Claude Code on the DarksGames production box. Authoring repo: `/root
 
 | Milestone | Scope | Done |
 |---|---|---|
-| M0 | Scaffold, SDD, README, first push | [ ] |
-| M1 | Deterministic physics + playable sandbox | [ ] |
-| M2 | Rules engine, AI, complete solo game | [ ] |
+| M0 | Scaffold, SDD, README, first push | [x] |
+| M1 | Deterministic physics + playable sandbox | [x] (human feel-check owed at M6) |
+| M2 | Rules engine, AI, complete solo game | [x] |
 | M3 | Private multiplayer with invite links | [ ] |
 | M4 | Public lobby, spectators, timer, rematch | [ ] |
 | M5 | dg-accounts sign-in, ELO stats, polish | [ ] |

@@ -131,7 +131,7 @@ function resolveBallBall(a, b, events) {
 
   a.state = STATE.SLIDING;
   b.state = STATE.SLIDING;
-  events.push({ type: 'ball', a: a.id, b: b.id });
+  events.push({ type: 'ball', a: a.id, b: b.id, speed: rvn });
 }
 
 function resolveCushion(b, nx, ny, events) {
@@ -146,7 +146,7 @@ function resolveCushion(b, nx, ny, events) {
   b.vy = vn2 * ny + vt2 * ty;
   b.wz *= RAIL_SPIN_KILL;
   b.state = STATE.SLIDING;
-  events.push({ type: 'rail', ball: b.id });
+  events.push({ type: 'rail', ball: b.id, speed: -vn });
 }
 
 function pocketBall(b, pocket, events) {

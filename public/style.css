@@ -59,6 +59,16 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .menu-buttons button small { color: var(--dim); font-weight: 400; font-size: 13px; }
 .menu-buttons button.ready:hover { border-color: var(--accent); transform: translateY(-1px); }
 .menu-buttons button:disabled { opacity: 0.45; cursor: default; }
+.menu-sublist { display: flex; gap: 8px; }
+.menu-sublist.hidden { display: none; }
+.menu-sublist button {
+  flex: 1;
+  padding: 10px 8px;
+  font-size: 14px;
+  justify-content: center;
+  background: #161624;
+}
+.menu-sublist button:hover { border-color: var(--accent); }
 .menu-foot { margin-top: 36px; }
 .menu-foot a { color: var(--dim); text-decoration: none; }
 .menu-foot a:hover { color: var(--accent); }
