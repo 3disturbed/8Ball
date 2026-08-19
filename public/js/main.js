@@ -1,14 +1,17 @@
-// Screen router: menu <-> game screens. ?invite= deep links arrive in M3.
+// Screen router: menu <-> game screens, plus the ?invite= deep link.
 
 import { Renderer } from './render/Renderer.js';
 import { Controller } from './game/Controller.js';
 import { LocalTransport } from './net/LocalTransport.js';
+import { SocketTransport } from './net/SocketTransport.js';
 import { attachAim } from './input/AimControl.js';
 import { attachPower } from './input/PowerSlider.js';
 import { attachSpin } from './input/SpinWidget.js';
 import { makeHud } from './ui/Hud.js';
 import { makeMenu } from './ui/MenuScreen.js';
+import { makeLobby } from './ui/LobbyScreen.js';
 import { playEvent, playCueStrike, playChalk, playWin } from './audio/Sounds.js';
+import { rackBalls } from '/shared/physics/Rack.js';
 
 const app = document.getElementById('app');
 let current = null; // { destroy() }
@@ -21,14 +24,17 @@ function show(builder, ...args) {
 
 function menuScreen(container) {
   return makeMenu(container, {
-    onSandbox: () => show(gameScreen, { mode: 'sandbox', title: 'Sandbox — break away' }),
+    onSandbox: () => show(gameScreen, { kind: 'sandbox', title: 'Sandbox — break away' }),
     onSolo: (difficulty) => show(gameScreen, {
-      mode: 'solo', difficulty, title: `Solo vs AI (${difficulty})`,
+      kind: 'solo', difficulty, title: `Solo vs AI (${difficulty})`,
+    }),
+    onPrivate: (preset) => show(gameScreen, {
+      kind: 'online', action: { create: { preset, visibility: 'private' } }, title: 'Private table',
     }),
   });
 }
 
-function gameScreen(container, { mode, difficulty, title }) {
+function gameScreen(container, { kind, difficulty, action, title }) {
   const wrap = document.createElement('div');
   wrap.className = 'game-screen';
   const canvas = document.createElement('canvas');
@@ -40,14 +46,26 @@ function gameScreen(container, { mode, difficulty, title }) {
   hud.setStatus(title);
 
   const renderer = new Renderer(canvas);
-  const transport = new LocalTransport({ mode, difficulty, hud });
-  const controller = new Controller({ renderer, transport, hud });
+  let lobby = null;
+  let transport;
+  if (kind === 'online') {
+    lobby = makeLobby(wrap);
+    transport = new SocketTransport({
+      hud,
+      action,
+      onLobby: (snap) => lobby.update(snap),
+    });
+  } else {
+    transport = new LocalTransport({ mode: kind === 'solo' ? 'solo' : 'sandbox', difficulty, hud });
+  }
 
+  const controller = new Controller({ renderer, transport, hud });
   controller.onEvent = (e) => playEvent(e);
   controller.onStrike = (p) => playCueStrike(p);
   controller.onSettled = () => { if (controller.canShoot) playChalk(); };
+  transport.onWin = () => playWin();
 
-  if (mode === 'sandbox') {
+  if (kind === 'sandbox') {
     hud.addAction('Re-rack', () => {
       transport.begin();
       hud.setStatus('Sandbox — break away');
@@ -61,6 +79,11 @@ function gameScreen(container, { mode, difficulty, title }) {
   const onResize = () => renderer.resize();
   window.addEventListener('resize', onResize);
 
+  if (kind === 'online') {
+    // idle table for looks until the snapshot arrives
+    controller.start(rackBalls(), { isBreak: true });
+    controller.setTurn({ canShoot: false });
+  }
   transport.begin();
 
   return {
@@ -70,12 +93,17 @@ function gameScreen(container, { mode, difficulty, title }) {
       window.removeEventListener('resize', onResize);
       power.setVisible(false);
       spin.close();
+      if (lobby) lobby.destroy();
       wrap.remove();
       hud.destroy();
     },
   };
 }
 
-export { playWin }; // used by transports at match end (M3+ wires this per-screen)
-
-show(menuScreen);
+const invite = new URLSearchParams(location.search).get('invite');
+if (invite) {
+  history.replaceState(null, '', location.pathname);
+  show(gameScreen, { kind: 'online', action: { invite }, title: 'Joining table…' });
+} else {
+  show(menuScreen);
+}
