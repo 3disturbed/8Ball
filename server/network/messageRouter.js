@@ -87,6 +87,18 @@ export function bindSockets(io, service) {
       try { service.rematchVote(requireId()); } catch (err) { fail(err); }
     });
 
+    socket.on(MSG.QUEUE_JOIN, () => {
+      try { service.queueJoin(requireId()); } catch (err) { fail(err); }
+    });
+
+    socket.on(MSG.QUEUE_LEAVE, () => {
+      try { service.queueLeave(requireId()); } catch (err) { fail(err); }
+    });
+
+    socket.on(MSG.CLAIM_WIN, () => {
+      try { service.claimWin(requireId()); } catch (err) { fail(err); }
+    });
+
     socket.on('disconnect', async () => {
       const playerId = socket.data.playerId;
       if (!playerId) return;

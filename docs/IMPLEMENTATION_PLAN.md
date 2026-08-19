@@ -10,7 +10,7 @@ Executed by Claude Code on the DarksGames production box. Authoring repo: `/root
 | M1 | Deterministic physics + playable sandbox | [x] (human feel-check owed at M6) |
 | M2 | Rules engine, AI, complete solo game | [x] |
 | M3 | Private multiplayer with invite links | [x] |
-| M4 | Public lobby, spectators, timer, rematch | [ ] |
+| M4 | Public lobby, spectators, timer, rematch | [x] |
 | M5 | dg-accounts sign-in, ELO stats, polish | [ ] |
 | M6 | Deploy to 8ball.darksgames.app | [ ] |
 | M7 | Game Card on darksgames.app, launch | [ ] |

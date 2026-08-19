@@ -24,7 +24,10 @@ export const MSG = Object.freeze({
   MATCH_END: 'match:end',
   QUEUE_JOIN: 'queue:join',
   QUEUE_LEAVE: 'queue:leave',
+  CLAIM_WIN: 'claim:win',
 });
+
+export const ROTATE_DELAY_MS = 4000;
 
 export const DISCONNECT_GRACE_MS = 60_000;
 export const INVITE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;

@@ -53,13 +53,19 @@ export class SocketTransport {
     s.on(MSG.TABLE_UPDATE, (u) => {
       if (this.snap) {
         Object.assign(this.snap, u);
-        this.onLobby(this.snap);
+        if (this.snap.phase === 'LOBBY') this.onLobby(this.snap);
         this.refreshStatus();
+        this.watchOpponentPresence();
       }
     });
     s.on(MSG.SHOT_RESULT, (r) => this.onShotResult(r));
     s.on(MSG.AIM_UPDATE, (a) => this.onAim(a));
     s.on(MSG.CUE_PLACE, (a) => this.onAim({ ...a, power: 0 }));
+    s.on(MSG.TURN_TIMEOUT, (p) => {
+      if (this.snap) this.snap.match = p.match;
+      this.clockOffset = p.serverNow - Date.now();
+      this.pushTurn(p.next, p.match, p.ruling.message);
+    });
     s.on(MSG.MATCH_END, (m) => this.onMatchEnd(m));
     s.on(MSG.REMATCH_VOTE, ({ votes }) => {
       if (this.hud) this.hud.setStatus(`Rematch votes: ${votes.length}/2`);
@@ -73,6 +79,14 @@ export class SocketTransport {
     });
 
     this._aimTimer = setInterval(() => this.streamAim(), 1000 / AIM_HZ);
+    this._clockTimer = setInterval(() => this.updateClock(), 400);
+  }
+
+  updateClock() {
+    if (!this.hud || !this._statusBase) return;
+    if (!this.deadline) return;
+    const left = Math.max(0, Math.ceil((this.deadline - (Date.now() + (this.clockOffset || 0))) / 1000));
+    this.hud.setStatus(`${this._statusBase} · ⏱ ${left}s`);
   }
 
   applySnapshot(snap) {
@@ -176,6 +190,7 @@ export class SocketTransport {
   refreshStatus(match = this.snap?.match) {
     if (!this.hud) return;
     if (!match || !match.rack) return;
+    this._statusBase = null;
     const rack = match.rack;
     const score = `${match.score.A}–${match.score.B}`;
     const seatName = (s) => this.snap?.seats?.[s]?.name || s;
@@ -187,7 +202,33 @@ export class SocketTransport {
       const b = `${seatName('B')}: ${rack.groups.B} (${remaining(this.controller.balls, rack.groups.B)})`;
       groups = `${a} · ${b}`;
     }
-    this.hud.setStatus(`${score} · ${groups} · ${who}`);
+    this._statusBase = `${score} · ${groups} · ${who}`;
+    if (this.snap?.queuePosition) this._statusBase += ` · queue #${this.snap.queuePosition}`;
+    this.hud.setStatus(this._statusBase);
+  }
+
+  joinQueue() { this.socket.emit(MSG.QUEUE_JOIN); }
+
+  leaveQueue() { this.socket.emit(MSG.QUEUE_LEAVE); }
+
+  claimWin() { this.socket.emit(MSG.CLAIM_WIN); }
+
+  // Opponent drops mid-game: after the 60s grace, offer "Claim win".
+  watchOpponentPresence() {
+    if (this.mySeat === null || !this.snap?.seats) return;
+    const oppSeat = this.mySeat === 'A' ? 'B' : 'A';
+    const opp = this.snap.seats[oppSeat];
+    clearTimeout(this._claimTimer);
+    if (opp && opp.connected === false && this.snap.phase !== 'END') {
+      this.controller.showBanner('Opponent disconnected — holding their seat…');
+      this._claimTimer = setTimeout(() => {
+        if (!this.hud) return;
+        this._claimBtn = this.hud.addAction('Claim win', () => this.claimWin());
+      }, 61_000);
+    } else if (this._claimBtn) {
+      this._claimBtn.remove();
+      this._claimBtn = null;
+    }
   }
 
   onAim(a) {
@@ -238,6 +279,8 @@ export class SocketTransport {
 
   destroy() {
     clearInterval(this._aimTimer);
+    clearInterval(this._clockTimer);
+    clearTimeout(this._claimTimer);
     if (this.socket) {
       this.socket.emit(MSG.TABLE_LEAVE);
       this.socket.disconnect();

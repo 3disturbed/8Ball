@@ -9,6 +9,7 @@ import { Server } from 'socket.io';
 import { TableService } from './lobby/TableService.js';
 import { InviteStore } from './lobby/InviteStore.js';
 import { bindSockets } from './network/messageRouter.js';
+import { bindApi } from './api/tables.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -30,6 +31,7 @@ export async function createGameServer({ withStore = true } = {}) {
   });
   await service.init();
   bindSockets(io, service);
+  bindApi(app, service);
 
   const reaper = setInterval(() => service.reap(), 60_000);
   reaper.unref();

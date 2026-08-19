@@ -10,6 +10,8 @@ import { attachSpin } from './input/SpinWidget.js';
 import { makeHud } from './ui/Hud.js';
 import { makeMenu } from './ui/MenuScreen.js';
 import { makeLobby } from './ui/LobbyScreen.js';
+import { makeBrowser } from './ui/TableBrowser.js';
+import { rulesDialog } from './ui/RulesDialog.js';
 import { playEvent, playCueStrike, playChalk, playWin } from './audio/Sounds.js';
 import { rackBalls } from '/shared/physics/Rack.js';
 
@@ -28,9 +30,49 @@ function menuScreen(container) {
     onSolo: (difficulty) => show(gameScreen, {
       kind: 'solo', difficulty, title: `Solo vs AI (${difficulty})`,
     }),
-    onPrivate: (preset) => show(gameScreen, {
-      kind: 'online', action: { create: { preset, visibility: 'private' } }, title: 'Private table',
+    onPrivate: async () => {
+      const rules = await rulesDialog(container, { title: 'Private table' });
+      if (!rules) return;
+      show(gameScreen, {
+        kind: 'online',
+        action: { create: { ...rules, visibility: 'private' } },
+        title: 'Private table',
+      });
+    },
+    onPublic: () => show(browserScreen),
+  });
+}
+
+function browserScreen(container) {
+  return makeBrowser(container, {
+    onBack: () => show(menuScreen),
+    onJoin: (inviteToken) => show(gameScreen, {
+      kind: 'online', action: { invite: inviteToken }, title: 'Joining table…',
     }),
+    onHost: async () => {
+      const rules = await rulesDialog(container, { title: 'Host a public table' });
+      if (!rules) return;
+      show(gameScreen, {
+        kind: 'online',
+        action: { create: { ...rules, visibility: 'public' } },
+        title: 'Public table',
+      });
+    },
+    onQuick: async () => {
+      try {
+        const res = await fetch('/api/quickmatch', { method: 'POST' });
+        const out = await res.json();
+        if (out.inviteToken) {
+          show(gameScreen, { kind: 'online', action: { invite: out.inviteToken }, title: 'Quick match' });
+        } else {
+          show(gameScreen, {
+            kind: 'online',
+            action: { create: { preset: 'standard', visibility: 'public' } },
+            title: 'Public table',
+          });
+        }
+      } catch { /* browser row shows unreachable state */ }
+    },
   });
 }
 
@@ -50,10 +92,30 @@ function gameScreen(container, { kind, difficulty, action, title }) {
   let transport;
   if (kind === 'online') {
     lobby = makeLobby(wrap);
+    let queueBtn = null;
     transport = new SocketTransport({
       hud,
       action,
       onLobby: (snap) => lobby.update(snap),
+      onPhase: (phase, snap) => {
+        // Spectators get a winner-stays-on queue toggle
+        if (snap.you === 'spectator' && !queueBtn) {
+          queueBtn = hud.addAction('Join queue', () => {
+            if (queueBtn.dataset.queued) {
+              transport.leaveQueue();
+              delete queueBtn.dataset.queued;
+              queueBtn.textContent = 'Join queue';
+            } else {
+              transport.joinQueue();
+              queueBtn.dataset.queued = '1';
+              queueBtn.textContent = 'Leave queue';
+            }
+          });
+        } else if (snap.you !== 'spectator' && queueBtn) {
+          queueBtn.remove();
+          queueBtn = null;
+        }
+      },
     });
   } else {
     transport = new LocalTransport({ mode: kind === 'solo' ? 'solo' : 'sandbox', difficulty, hud });

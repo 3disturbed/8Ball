@@ -4,7 +4,9 @@
 // so unit tests run without sockets. Rooms: `table:<id>` and `player:<id>`.
 
 import { randomUUID, randomBytes } from 'node:crypto';
-import { MSG, DISCONNECT_GRACE_MS, INVITE_LIFETIME_MS, LOBBY_REAP_MS } from '../../shared/MessageTypes.js';
+import {
+  MSG, DISCONNECT_GRACE_MS, INVITE_LIFETIME_MS, LOBBY_REAP_MS, ROTATE_DELAY_MS,
+} from '../../shared/MessageTypes.js';
 import { DT, TIP_MAX, STATE } from '../../shared/Constants.js';
 import { rackBalls } from '../../shared/physics/Rack.js';
 import { runShot, isLegalPlacement } from '../../shared/physics/Simulation.js';
@@ -172,8 +174,49 @@ export class TableService {
     t.phase = 'PLAYING';
     t.lastShot = null;
     t.rematch.clear();
-    t.deadline = null;
+    const next = this.nextTurnInfo(t, 2000); // grace to load the snapshot
+    t.deadline = next?.deadline ?? null;
+    this.scheduleTurnTimer(t);
     this.broadcastSnapshots(t);
+  }
+
+  // Centralized match end: emits MATCH_END and runs winner-stays-on rotation
+  // when spectators are queued.
+  finishMatch(t, winner, reason) {
+    t.phase = 'END';
+    if (t.match) t.match = { ...t.match, winner };
+    this.clearTurnTimer(t);
+    const loserSeat = otherSeat(winner);
+
+    let rotation = null;
+    if (t.queue.length > 0) {
+      const loser = t.seats[loserSeat];
+      if (loser) {
+        t.seats[loserSeat] = null;
+        this.playerTable.set(loser.playerId, t.id); // stays at the table
+        t.spectators.set(loser.playerId, { name: loser.name });
+        if (loser.connected) t.queue.push(loser.playerId); // back of the line
+      }
+      let nextId = null;
+      while (t.queue.length && nextId === null) {
+        const cand = t.queue.shift();
+        if (t.spectators.has(cand)) nextId = cand;
+      }
+      if (nextId) {
+        t.spectators.delete(nextId);
+        t.seats[loserSeat] = this.newSeat(nextId);
+        rotation = { incoming: this.nameOf(nextId), seat: loserSeat };
+        t.rotateHandle = setTimeout(() => {
+          if (this.tables.has(t.id) && t.seats.A && t.seats.B) this.startMatch(t, loserSeat);
+        }, ROTATE_DELAY_MS);
+        t.rotateHandle.unref?.();
+      }
+    }
+
+    this.emit(this.room(t), MSG.MATCH_END, {
+      winner, reason, score: t.match?.score || null, rotation,
+    });
+    if (rotation) this.broadcastSnapshots(t);
   }
 
   leave(playerId, { silent = false } = {}) {
@@ -185,14 +228,11 @@ export class TableService {
       t.seats[seat] = null;
       if (t.phase === 'PLAYING') {
         // walkover: the remaining player wins the match
-        t.phase = 'END';
-        t.match = { ...t.match, winner: otherSeat(seat) };
-        this.emit(this.room(t), MSG.MATCH_END, {
-          winner: otherSeat(seat), reason: 'left', score: t.match.score,
-        });
+        this.finishMatch(t, otherSeat(seat), 'left');
       }
     } else {
       t.spectators.delete(playerId);
+      t.queue = t.queue.filter((id) => id !== playerId);
     }
     if (!t.seats.A && !t.seats.B && t.spectators.size === 0) t.emptySince = this.now();
     if (!silent) this.broadcastSnapshots(t);
@@ -236,6 +276,8 @@ export class TableService {
       rules: t.rules,
       ...this.publicSeats(t),
       you: seat || 'spectator',
+      queue: t.queue.map((id) => this.nameOf(id)),
+      queuePosition: seat ? null : (t.queue.indexOf(playerId) + 1 || null),
       phase: t.phase,
       match: t.match ? {
         score: t.match.score, rackNo: t.match.rackNo, rack: t.match.rack, winner: t.match.winner,
@@ -359,16 +401,103 @@ export class TableService {
       input, seat, preBalls, isBreak, at: this.now(),
     };
     t.deadline = nextTurn?.deadline ?? null;
+    this.scheduleTurnTimer(t);
 
     this.emit(this.room(t), MSG.SHOT_RESULT, payload);
 
-    if (t.match.winner) {
-      t.phase = 'END';
-      this.emit(this.room(t), MSG.MATCH_END, {
-        winner: t.match.winner, reason: 'played', score: t.match.score,
+    if (t.match.winner) this.finishMatch(t, t.match.winner, 'played');
+    return payload;
+  }
+
+  // ------------------------------------------------------------ shot clock
+
+  scheduleTurnTimer(t) {
+    this.clearTurnTimer(t);
+    if (!t.deadline || t.phase !== 'PLAYING' || !t.rules.turnTimer) return;
+    const ms = Math.max(0, t.deadline - this.now());
+    t.timerHandle = setTimeout(() => this.fireTimeout(t.id), ms + 50);
+    t.timerHandle.unref?.();
+  }
+
+  clearTurnTimer(t) {
+    if (t.timerHandle) clearTimeout(t.timerHandle);
+    t.timerHandle = null;
+  }
+
+  fireTimeout(tableId) {
+    const t = this.tables.get(tableId);
+    if (!t || t.phase !== 'PLAYING' || !t.rules.turnTimer) return;
+    if (!t.deadline || this.now() < t.deadline) return; // stale timer
+    const out = applyMatchTimeout(t.match);
+    t.match = out.match;
+    t.lastShot = null;
+    const next = this.nextTurnInfo(t, 0);
+    t.deadline = next?.deadline ?? null;
+    this.scheduleTurnTimer(t);
+    this.emit(this.room(t), MSG.TURN_TIMEOUT, {
+      ruling: out.ruling,
+      next,
+      match: { score: t.match.score, rackNo: t.match.rackNo, rack: t.match.rack, winner: t.match.winner },
+      serverNow: this.now(),
+    });
+  }
+
+  // ------------------------------------------------------------ queue & claims
+
+  queueJoin(playerId) {
+    const t = this.tableOf(playerId);
+    if (!t || this.seatOf(t, playerId)) return;
+    if (!t.spectators.has(playerId)) return;
+    if (!t.queue.includes(playerId)) t.queue.push(playerId);
+    this.broadcastSnapshots(t);
+  }
+
+  queueLeave(playerId) {
+    const t = this.tableOf(playerId);
+    if (!t) return;
+    t.queue = t.queue.filter((id) => id !== playerId);
+    this.broadcastSnapshots(t);
+  }
+
+  claimWin(playerId) {
+    const t = this.tableOf(playerId);
+    if (!t || t.phase !== 'PLAYING') throw new Error('Nothing to claim.');
+    const seat = this.seatOf(t, playerId);
+    if (!seat) throw new Error('Only a seated player can claim.');
+    const opp = t.seats[otherSeat(seat)];
+    if (!opp || opp.connected
+      || !opp.disconnectedAt || this.now() - opp.disconnectedAt < DISCONNECT_GRACE_MS) {
+      throw new Error('Your opponent still has time to reconnect.');
+    }
+    this.finishMatch(t, seat, 'claimed');
+  }
+
+  // ------------------------------------------------------------ public lobby
+
+  publicTables() {
+    const list = [];
+    for (const t of this.tables.values()) {
+      if (t.visibility !== 'public' || t.expiresAt <= this.now()) continue;
+      if (!this.anyoneConnected(t)) continue;
+      list.push({
+        inviteToken: t.inviteToken,
+        hostName: t.seats.A?.name || t.seats.B?.name || t.hostName,
+        preset: t.rules.preset,
+        turnTimer: t.rules.turnTimer,
+        bestOf: t.rules.bestOf,
+        seatsFilled: (t.seats.A ? 1 : 0) + (t.seats.B ? 1 : 0),
+        spectators: t.spectators.size,
+        queue: t.queue.length,
+        phase: t.phase,
+        createdAt: t.createdAt,
       });
     }
-    return payload;
+    return list.sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  quickmatch() {
+    const open = this.publicTables().filter((x) => x.seatsFilled < 2);
+    return open.length ? { inviteToken: open[0].inviteToken } : { create: true };
   }
 
   nextTurnInfo(t, animMs) {
@@ -424,6 +553,8 @@ export class TableService {
       const dead = (t.emptySince && now - t.emptySince > LOBBY_REAP_MS)
         || t.expiresAt <= now;
       if (dead) {
+        this.clearTurnTimer(t);
+        if (t.rotateHandle) clearTimeout(t.rotateHandle);
         for (const s of ['A', 'B']) {
           if (t.seats[s]) this.playerTable.delete(t.seats[s].playerId);
         }
