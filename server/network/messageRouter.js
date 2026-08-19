@@ -3,7 +3,7 @@
 
 import { MSG } from '../../shared/MessageTypes.js';
 
-export function bindSockets(io, service) {
+export function bindSockets(io, service, { verifyToken = null } = {}) {
   io.on('connection', (socket) => {
     const fail = (err) => socket.emit(MSG.TABLE_ERROR, { message: err.message || 'Something broke.' });
 
@@ -13,13 +13,20 @@ export function bindSockets(io, service) {
       return id;
     };
 
-    socket.on(MSG.HELLO, (payload = {}) => {
+    socket.on(MSG.HELLO, async (payload = {}) => {
       try {
         const playerId = String(payload.playerId || '').slice(0, 64);
         if (playerId.length < 8) throw new Error('Bad player id.');
         socket.data.playerId = playerId;
         socket.join(service.playerRoom(playerId));
         service.setName(playerId, payload.name);
+
+        // Optional sign-in: a bad token just means guest play, never an error.
+        if (payload.authToken && verifyToken) {
+          try {
+            service.setAccount(playerId, await verifyToken(payload.authToken));
+          } catch { /* guest */ }
+        }
 
         if (payload.inviteToken) {
           const { table } = service.joinByInvite(playerId, payload.inviteToken);

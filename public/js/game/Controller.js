@@ -24,7 +24,8 @@ export class Controller {
     this.pendingPlace = null;      // {x, y, legal}
     this.placeKitchenOnly = false;
     this.guideMode = 'full';
-    this.effects = { pocketFlashes: [] };
+    this.effects = { pocketFlashes: [], shake: null, confetti: [] };
+    this.potted = [];
     this.banner = null;
     this.callRequired = false;     // rules demand a called pocket this turn
     this.calledPocket = null;
@@ -47,6 +48,9 @@ export class Controller {
   start(balls, { isBreak = true } = {}) {
     this.balls = cloneBalls(balls);
     this.isBreak = isBreak;
+    this.potted = this.balls
+      .filter((b) => b.id !== 0 && b.state === STATE.POCKETED)
+      .map((b) => b.id);
     this.phase = 'aim';
     this._running = true;
     this._last = performance.now();
@@ -129,6 +133,9 @@ export class Controller {
       this._strikeT += dtFrame * 1000;
       if (this._strikeT >= STRIKE_MS) {
         if (this.onStrike) this.onStrike(this._pendingInput.power / 1000);
+        if (this.isBreak && this._pendingInput.power > 700) {
+          this.effects.shake = { t: 1, amp: 5 };
+        }
         beginShot(this.balls, this._pendingInput, { isBreak: this.isBreak });
         this._events = [];
         this._eventCursor = 0;
@@ -153,8 +160,27 @@ export class Controller {
     while (this._eventCursor < this._events.length) {
       const e = this._events[this._eventCursor];
       this._eventCursor += 1;
-      if (e.type === 'pocket') this.effects.pocketFlashes.push({ pocket: e.pocket, t: 0 });
+      if (e.type === 'pocket') {
+        this.effects.pocketFlashes.push({ pocket: e.pocket, t: 0 });
+        if (e.ball !== 0) this.potted.push(e.ball);
+      }
       if (this.onEvent) this.onEvent(e, this.balls);
+    }
+  }
+
+  startConfetti() {
+    const colors = ['#e8c15a', '#e05a4e', '#4caf6e', '#2b5bd7', '#f4f0e6'];
+    for (let i = 0; i < 90; i += 1) {
+      this.effects.confetti.push({
+        x: Math.random(),
+        y: -0.05 - Math.random() * 0.2,
+        vx: (Math.random() - 0.5) * 0.15,
+        vy: 0.25 + Math.random() * 0.35,
+        rot: Math.random() * 6.28,
+        vr: (Math.random() - 0.5) * 8,
+        color: colors[i % colors.length],
+        size: 5 + Math.random() * 6,
+      });
     }
   }
 
@@ -196,6 +222,19 @@ export class Controller {
     const fl = this.effects.pocketFlashes;
     for (const f of fl) f.t += dt * 2.2;
     this.effects.pocketFlashes = fl.filter((f) => f.t < 1);
+    if (this.effects.shake) {
+      this.effects.shake.t -= dt * 4;
+      if (this.effects.shake.t <= 0) this.effects.shake = null;
+    }
+    if (this.effects.confetti.length) {
+      for (const c of this.effects.confetti) {
+        c.x += c.vx * dt;
+        c.y += c.vy * dt;
+        c.vy += 0.25 * dt;
+        c.rot += c.vr * dt;
+      }
+      this.effects.confetti = this.effects.confetti.filter((c) => c.y < 1.15);
+    }
     if (this.banner) {
       this.banner.life += dt;
       this.banner.alpha = this.banner.life < 0.25 ? this.banner.life / 0.25
@@ -211,6 +250,7 @@ export class Controller {
       effects: this.effects,
       banner: this.banner,
       calledPocket: this.calledPocket,
+      potted: this.potted,
     };
     if (this.phase === 'watching' && this.opponentAim) {
       state.cue = this.opponentAim;

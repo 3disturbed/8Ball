@@ -161,6 +161,7 @@ export class LocalTransport {
   finishMatch(winner) {
     const c = this.controller;
     const won = winner === 'A';
+    if (won && this.onWin) this.onWin();
     c.setTurn({ canShoot: false, banner: won ? 'You win the match! 🎱' : 'AI takes it — rematch?' });
     this.hudStatus(won ? 'Victory!' : 'Defeat');
     if (this.hud) {

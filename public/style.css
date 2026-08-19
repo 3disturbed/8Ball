@@ -85,6 +85,17 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   text-align: center;
 }
 .menu-name:focus { outline: none; border-color: var(--accent); }
+.menu-chip {
+  margin-bottom: 14px;
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--dim);
+  font-size: 13px;
+}
+.menu-chip:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
+.menu-chip:disabled { color: var(--accent); cursor: default; }
 
 /* ----------------------------------------------------------------- lobby */
 

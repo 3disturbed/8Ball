@@ -7,6 +7,7 @@ import { MSG } from '/shared/MessageTypes.js';
 import { cloneBalls } from '/shared/physics/Rack.js';
 import { remaining } from '/shared/rules/RulesEngine.js';
 import { getPlayerId, getName } from './identity.js';
+import { playTick } from '../audio/Sounds.js';
 
 const AIM_HZ = 10;
 
@@ -37,11 +38,16 @@ export class SocketTransport {
     this.socket = io();
     const s = this.socket;
 
-    s.on('connect', () => {
+    s.on('connect', async () => {
+      let authToken;
+      try {
+        authToken = await window.DGAccount?.getToken?.() || undefined;
+      } catch { authToken = undefined; }
       s.emit(MSG.HELLO, {
         playerId: getPlayerId(),
         name: getName(),
         inviteToken: this.action.invite || undefined,
+        authToken,
       });
     });
 
@@ -87,6 +93,8 @@ export class SocketTransport {
     if (!this.deadline) return;
     const left = Math.max(0, Math.ceil((this.deadline - (Date.now() + (this.clockOffset || 0))) / 1000));
     this.hud.setStatus(`${this._statusBase} · ⏱ ${left}s`);
+    if (left !== this._lastTick && left <= 5 && left > 0 && this.controller.canShoot) playTick();
+    this._lastTick = left;
   }
 
   applySnapshot(snap) {
@@ -259,12 +267,17 @@ export class SocketTransport {
     this.socket.emit(MSG.REMATCH_VOTE);
   }
 
-  onMatchEnd({ winner, score, reason }) {
+  onMatchEnd({ winner, score, reason, elo, rotation }) {
     const won = this.mySeat !== null && winner === this.mySeat;
-    const text = this.mySeat === null
+    let text = this.mySeat === null
       ? `${this.snap?.seats?.[winner]?.name || winner} wins!`
       : won ? (reason === 'left' ? 'Opponent left — you win!' : 'You win the match! 🎱')
         : 'Match lost — rematch?';
+    if (elo && this.mySeat !== null) {
+      const delta = won ? elo.winnerDelta : elo.loserDelta;
+      text += ` (${delta > 0 ? '+' : ''}${delta} ELO)`;
+    }
+    if (rotation) text += ` · ${rotation.incoming} steps up`;
     this.controller.setTurn({ canShoot: false, banner: text });
     if (won && this.onWin) this.onWin();
     if (this.hud && this.mySeat !== null) {

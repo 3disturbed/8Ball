@@ -81,6 +81,10 @@ export function playChalk() {
   burst({ freq: 3600, q: 1.5, dur: 0.09, gain: 0.12 });
 }
 
+export function playTick() {
+  burst({ freq: 1900, q: 10, dur: 0.025, gain: 0.14 });
+}
+
 export function playWin() {
   thump({ freq: 392, dur: 0.25, gain: 0.3 });
   thump({ freq: 523, dur: 0.3, gain: 0.3, delay: 0.16 });

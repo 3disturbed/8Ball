@@ -122,10 +122,23 @@ function gameScreen(container, { kind, difficulty, action, title }) {
   }
 
   const controller = new Controller({ renderer, transport, hud });
-  controller.onEvent = (e) => playEvent(e);
+  const buzz = (pattern) => { try { navigator.vibrate?.(pattern); } catch { /* no haptics */ } };
+  controller.onEvent = (e) => {
+    playEvent(e);
+    if (e.type === 'pocket') buzz(20);
+    else if (e.type === 'ball' && e.speed > 4) {
+      buzz(12);
+      const shake = controller.effects.shake;
+      if (!shake || shake.amp < 2) controller.effects.shake = { t: 1, amp: 2 };
+    }
+  };
   controller.onStrike = (p) => playCueStrike(p);
   controller.onSettled = () => { if (controller.canShoot) playChalk(); };
-  transport.onWin = () => playWin();
+  transport.onWin = () => {
+    playWin();
+    controller.startConfetti();
+    buzz([60, 40, 60]);
+  };
 
   if (kind === 'sandbox') {
     hud.addAction('Re-rack', () => {

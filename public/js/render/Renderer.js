@@ -2,7 +2,7 @@
 // table, balls, aiming guide, cue stick. Pure drawing — no game state.
 
 import {
-  TABLE_L, TABLE_W, BALL_R, HEADSTRING_X, FOOT_SPOT, STATE,
+  TABLE_L, TABLE_W, BALL_R, HEADSTRING_X, FOOT_SPOT, STATE, BALL_COLORS,
 } from '/shared/Constants.js';
 import { TABLE } from '/shared/physics/Collisions.js';
 import { drawBall, spinDecals } from './BallPainter.js';
@@ -59,6 +59,15 @@ export class Renderer {
     const h = this.canvas.clientHeight;
     ctx.clearRect(0, 0, w, h);
 
+    const shake = state.effects?.shake;
+    if (shake) {
+      ctx.save();
+      ctx.translate(
+        (Math.random() * 2 - 1) * shake.amp * shake.t,
+        (Math.random() * 2 - 1) * shake.amp * shake.t,
+      );
+    }
+
     this.drawTable(state);
     if (dtFrame) spinDecals(state.balls, dtFrame);
 
@@ -72,7 +81,54 @@ export class Renderer {
     if (state.ghost) this.drawGhostCue(state.ghost, r);
     if (state.guide) this.drawGuide(state.guide, r);
     if (state.cue) this.drawCueStick(state.cue, r);
+    if (shake) ctx.restore();
+
+    if (state.potted?.length) this.drawTray(state.potted);
+    if (state.effects?.confetti?.length) this.drawConfetti(state.effects.confetti, w, h);
     if (state.banner) this.drawBanner(state.banner);
+  }
+
+  // Potted balls rail tray: solids left, 8 center, stripes right.
+  drawTray(potted) {
+    const { ctx } = this;
+    const w = this.canvas.clientWidth;
+    const r = 7;
+    const solids = potted.filter((id) => id >= 1 && id <= 7).sort((a, b) => a - b);
+    const stripes = potted.filter((id) => id >= 9).sort((a, b) => a - b);
+    const has8 = potted.includes(8);
+    const y = 44;
+    const drawMini = (id, x) => {
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, 7);
+      ctx.fillStyle = BALL_COLORS[id];
+      ctx.fill();
+      if (id >= 9) {
+        ctx.beginPath();
+        ctx.arc(x, y, r, -0.6, 0.6);
+        ctx.arc(x, y, r, Math.PI - 0.6, Math.PI + 0.6);
+        ctx.fillStyle = '#f4f0e6';
+        ctx.fill();
+      }
+      ctx.beginPath();
+      ctx.arc(x - r * 0.3, y - r * 0.3, r * 0.25, 0, 7);
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.fill();
+    };
+    solids.forEach((id, i) => drawMini(id, 16 + i * (r * 2 + 4)));
+    stripes.forEach((id, i) => drawMini(id, w - 16 - i * (r * 2 + 4)));
+    if (has8) drawMini(8, w / 2);
+  }
+
+  drawConfetti(confetti, w, h) {
+    const { ctx } = this;
+    for (const c of confetti) {
+      ctx.save();
+      ctx.translate(c.x * w, c.y * h);
+      ctx.rotate(c.rot);
+      ctx.fillStyle = c.color;
+      ctx.fillRect(-c.size / 2, -c.size / 4, c.size, c.size / 2);
+      ctx.restore();
+    }
   }
 
   drawTable(state) {

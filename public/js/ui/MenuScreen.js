@@ -27,6 +27,28 @@ export function makeMenu(container, { onSandbox, onSolo, onPrivate, onPublic }) 
   nameInput.value = getName();
   nameInput.addEventListener('change', () => setName(nameInput.value));
 
+  // Optional Darks Games sign-in chip (rated games). Guests just play.
+  const chip = document.createElement('button');
+  chip.className = 'menu-chip';
+  chip.textContent = '☆ Sign in for rated games';
+  el.insertBefore(chip, el.querySelector('.menu-buttons'));
+  const initAccount = () => {
+    if (!window.DGAccount) { chip.style.display = 'none'; return; }
+    try {
+      window.DGAccount.init({ game: '8ball' });
+      window.DGAccount.on('user', (user) => {
+        if (user) {
+          chip.textContent = `★ ${user.name || user.email || 'signed in'} — rated play on`;
+          chip.disabled = true;
+          if (!getName() && user.name) { setName(user.name); nameInput.value = user.name; }
+        }
+      });
+      chip.addEventListener('click', () => window.DGAccount.login());
+    } catch { chip.style.display = 'none'; }
+  };
+  if (window.DGAccount) initAccount();
+  else window.addEventListener('load', initAccount, { once: true });
+
   const toggle = (key) => {
     const target = el.querySelector(`[data-sub="${key}"]`);
     const wasHidden = target.classList.contains('hidden');

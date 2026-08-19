@@ -10,6 +10,9 @@ import { TableService } from './lobby/TableService.js';
 import { InviteStore } from './lobby/InviteStore.js';
 import { bindSockets } from './network/messageRouter.js';
 import { bindApi } from './api/tables.js';
+import { bindStatsApi } from './api/stats.js';
+import { PlayerStats } from './stats/PlayerStats.js';
+import { makeVerifier } from './auth/dgVerify.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -25,13 +28,18 @@ export async function createGameServer({ withStore = true } = {}) {
   const httpServer = createServer(app);
   const io = new Server(httpServer, { serveClient: true });
 
+  const stats = new PlayerStats();
+  if (withStore) await stats.load();
+
   const service = new TableService({
     emitter: (room, event, payload) => io.to(room).emit(event, payload),
     store: withStore ? new InviteStore() : null,
+    stats,
   });
   await service.init();
-  bindSockets(io, service);
+  bindSockets(io, service, { verifyToken: makeVerifier() });
   bindApi(app, service);
+  bindStatsApi(app, stats);
 
   const reaper = setInterval(() => service.reap(), 60_000);
   reaper.unref();

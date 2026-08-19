@@ -20,13 +20,25 @@ const STRIKE_MS = 120;
 const LAST_SHOT_TTL = 30_000;
 
 export class TableService {
-  constructor({ emitter, store = null, now = Date.now }) {
+  constructor({ emitter, store = null, now = Date.now, stats = null }) {
     this.emit = emitter;
     this.store = store;
     this.now = now;
+    this.stats = stats;
     this.tables = new Map();      // tableId -> table
     this.playerTable = new Map(); // playerId -> tableId
-    this.players = new Map();     // playerId -> { name }
+    this.players = new Map();     // playerId -> { name, account? }
+  }
+
+  setAccount(playerId, account) {
+    const p = this.players.get(playerId) || { name: `Guest-${playerId.slice(0, 4)}` };
+    p.account = account; // { sub, name } from a verified hub token
+    if (account?.name && (!p.name || p.name.startsWith('Guest-'))) p.name = account.name;
+    this.players.set(playerId, p);
+  }
+
+  accountOf(playerId) {
+    return this.players.get(playerId)?.account || null;
   }
 
   async init() {
@@ -117,7 +129,13 @@ export class TableService {
   }
 
   newSeat(playerId) {
-    return { playerId, name: this.nameOf(playerId), connected: true, disconnectedAt: null };
+    return {
+      playerId,
+      name: this.nameOf(playerId),
+      sub: this.accountOf(playerId)?.sub || null,
+      connected: true,
+      disconnectedAt: null,
+    };
   }
 
   findByInvite(token) {
@@ -174,6 +192,7 @@ export class TableService {
     t.phase = 'PLAYING';
     t.lastShot = null;
     t.rematch.clear();
+    t.rated = Boolean(t.seats.A?.sub && t.seats.B?.sub && t.seats.A.sub !== t.seats.B.sub);
     const next = this.nextTurnInfo(t, 2000); // grace to load the snapshot
     t.deadline = next?.deadline ?? null;
     this.scheduleTurnTimer(t);
@@ -187,6 +206,8 @@ export class TableService {
     if (t.match) t.match = { ...t.match, winner };
     this.clearTurnTimer(t);
     const loserSeat = otherSeat(winner);
+    const winnerRec = t.seats[winner];
+    const loserRec = t.seats[loserSeat]; // capture before rotation unseats them
 
     let rotation = null;
     if (t.queue.length > 0) {
@@ -213,8 +234,15 @@ export class TableService {
       }
     }
 
+    let elo = null;
+    if (t.rated && this.stats && winnerRec?.sub && loserRec?.sub) {
+      elo = this.stats.updateMatch(winnerRec.sub, loserRec.sub, {
+        winner: winnerRec.name, loser: loserRec.name,
+      });
+    }
+
     this.emit(this.room(t), MSG.MATCH_END, {
-      winner, reason, score: t.match?.score || null, rotation,
+      winner, reason, score: t.match?.score || null, rotation, elo, rated: Boolean(t.rated),
     });
     if (rotation) this.broadcastSnapshots(t);
   }
