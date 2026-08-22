@@ -30,11 +30,18 @@ export class PlayerStats {
     this.loaded = true;
   }
 
-  async persist() {
-    await mkdir(path.dirname(this.file), { recursive: true });
-    const tmp = `${this.file}.tmp`;
-    await writeFile(tmp, JSON.stringify({ players: Object.fromEntries(this.players) }, null, 2), 'utf8');
-    await rename(tmp, this.file);
+  // Writes are serialised: updateMatch() persists in the background, so two
+  // rated matches ending in the same tick (or a test calling persist() right
+  // after) must not race on the shared tmp file.
+  persist() {
+    const write = async () => {
+      await mkdir(path.dirname(this.file), { recursive: true });
+      const tmp = `${this.file}.tmp`;
+      await writeFile(tmp, JSON.stringify({ players: Object.fromEntries(this.players) }, null, 2), 'utf8');
+      await rename(tmp, this.file);
+    };
+    this._persistQueue = (this._persistQueue || Promise.resolve()).catch(() => {}).then(write);
+    return this._persistQueue;
   }
 
   get(sub) {
