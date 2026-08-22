@@ -62,6 +62,18 @@ test('two clients: create, link join, identical break, idempotency, reconnect', 
   assert.equal(lobbySnap.phase, 'LOBBY');
   assert.ok(lobbySnap.inviteToken.length > 20);
 
+  // Social-layer room lookup by invite token (GET /api/rooms/:token)
+  const roomRes = await fetch(`http://127.0.0.1:${port}/api/rooms/${lobbySnap.inviteToken}`);
+  assert.equal(roomRes.status, 200);
+  const room = await roomRes.json();
+  assert.deepEqual(
+    { code: room.code, players: room.players, max: room.max, phase: room.phase, joinable: room.joinable },
+    { code: lobbySnap.inviteToken, players: 1, max: 2, phase: 'LOBBY', joinable: true },
+  );
+  const missing = await fetch(`http://127.0.0.1:${port}/api/rooms/ZZZZZZ`);
+  assert.equal(missing.status, 404);
+  assert.deepEqual(await missing.json(), { error: 'not_found' });
+
   // B joins via the invite link token
   const b = client(port);
   const boxB = inbox(b, EVENTS);

@@ -62,6 +62,17 @@ test('unknown kid rejected', async () => {
   await assert.rejects(verify(makeToken(base, { kid: 'other' })), /unknown kid/);
 });
 
+test('party launch token (typ claim) rejected — not a player identity', async () => {
+  await assert.rejects(verify(makeToken({ ...base, typ: 'dg-party' })), /not an access token/);
+  await assert.rejects(verify(makeToken({ ...base, typ: '' })), /not an access token/);
+});
+
+test('handle surfaced next to name', async () => {
+  const out = await verify(makeToken({ ...base, handle: 'Dark#4821' }));
+  assert.equal(out.handle, 'Dark#4821');
+  assert.equal((await verify(makeToken(base))).handle, null);
+});
+
 test('garbage rejected, guests never call this path', async () => {
   await assert.rejects(verify('not-a-token'), /malformed/);
 });

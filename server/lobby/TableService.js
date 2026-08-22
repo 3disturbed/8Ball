@@ -32,8 +32,9 @@ export class TableService {
 
   setAccount(playerId, account) {
     const p = this.players.get(playerId) || { name: `Guest-${playerId.slice(0, 4)}` };
-    p.account = account; // { sub, name } from a verified hub token
-    if (account?.name && (!p.name || p.name.startsWith('Guest-'))) p.name = account.name;
+    p.account = account; // { sub, name, handle } from a verified hub token
+    const label = account?.name || account?.handle;
+    if (label && (!p.name || p.name.startsWith('Guest-'))) p.name = label;
     this.players.set(playerId, p);
   }
 

@@ -13,11 +13,14 @@ const AIM_HZ = 10;
 
 export class SocketTransport {
   // action: { create: {preset, visibility} } | { invite: token }
-  constructor({ hud, action, onLobby, onPhase }) {
+  // onSnapshot(snap|null): every authoritative table snapshot / seat update
+  // (social presence hook); null once the transport is torn down.
+  constructor({ hud, action, onLobby, onPhase, onSnapshot }) {
     this.hud = hud;
     this.action = action;
     this.onLobby = onLobby || (() => {});
     this.onPhase = onPhase || (() => {});
+    this.onSnapshot = onSnapshot || (() => {});
     this.controller = null;
     this.socket = null;
     this.mySeat = null;
@@ -62,6 +65,7 @@ export class SocketTransport {
         if (this.snap.phase === 'LOBBY') this.onLobby(this.snap);
         this.refreshStatus();
         this.watchOpponentPresence();
+        this.onSnapshot(this.snap);
       }
     });
     s.on(MSG.SHOT_RESULT, (r) => this.onShotResult(r));
@@ -99,6 +103,7 @@ export class SocketTransport {
 
   applySnapshot(snap) {
     this.snap = snap;
+    this.onSnapshot(snap);
     this.mySeat = snap.you === 'A' || snap.you === 'B' ? snap.you : null;
     this.rules = snap.rules;
     this.controller.guideMode = snap.rules.guideline;
@@ -298,5 +303,7 @@ export class SocketTransport {
       this.socket.emit(MSG.TABLE_LEAVE);
       this.socket.disconnect();
     }
+    this.snap = null;
+    this.onSnapshot(null);
   }
 }

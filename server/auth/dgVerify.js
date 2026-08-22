@@ -31,7 +31,7 @@ export function makeVerifier(options = {}) {
     return key;
   }
 
-  // -> { sub, name } or throws.
+  // -> { sub, name, handle } or throws.
   return async function verifyToken(token) {
     const parts = String(token || '').split('.');
     if (parts.length !== 3) throw new Error('malformed token');
@@ -48,6 +48,9 @@ export function makeVerifier(options = {}) {
     if (!ok) throw new Error('bad signature');
 
     const claims = JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));
+    // Party launch tokens (typ:"dg-party") are signed by the same key with
+    // aud=8ball; they are not player identities. Access tokens carry no typ.
+    if (claims.typ !== undefined) throw new Error('not an access token');
     const now = Math.floor(Date.now() / 1000);
     if (typeof claims.exp === 'number' && claims.exp < now) throw new Error('expired');
     if (typeof claims.nbf === 'number' && claims.nbf > now + 30) throw new Error('not yet valid');
@@ -59,6 +62,7 @@ export function makeVerifier(options = {}) {
     return {
       sub: String(claims.sub),
       name: String(claims.name || claims.username || claims.display_name || '').slice(0, 18) || null,
+      handle: claims.handle ? String(claims.handle).slice(0, 32) : null, // "Darko#4821"
     };
   };
 }

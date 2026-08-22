@@ -3,7 +3,7 @@
 import { Renderer } from './render/Renderer.js';
 import { Controller } from './game/Controller.js';
 import { LocalTransport } from './net/LocalTransport.js';
-import { SocketTransport } from './net/SocketTransport.js';
+import { SocketTransport } from './net/SocketTransport.js?v=2';
 import { attachAim } from './input/AimControl.js';
 import { attachPower } from './input/PowerSlider.js';
 import { attachSpin } from './input/SpinWidget.js';
@@ -96,6 +96,7 @@ function gameScreen(container, { kind, difficulty, action, title }) {
     transport = new SocketTransport({
       hud,
       action,
+      onSnapshot,
       onLobby: (snap) => lobby.update(snap),
       onPhase: (phase, snap) => {
         // Spectators get a winner-stays-on queue toggle
@@ -119,6 +120,8 @@ function gameScreen(container, { kind, difficulty, action, title }) {
     });
   } else {
     transport = new LocalTransport({ mode: kind === 'solo' ? 'solo' : 'sandbox', difficulty, hud });
+    soloPresence = { state: 'solo', detail: title };
+    publishPresence();
   }
 
   const controller = new Controller({ renderer, transport, hud });
@@ -165,6 +168,9 @@ function gameScreen(container, { kind, difficulty, action, title }) {
     destroy() {
       controller.stop();
       if (transport.destroy) transport.destroy();
+      currentSnap = null;
+      soloPresence = null;
+      publishPresence();
       window.removeEventListener('resize', onResize);
       power.setVisible(false);
       spin.close();
@@ -174,6 +180,99 @@ function gameScreen(container, { kind, difficulty, action, title }) {
     },
   };
 }
+
+// ---------------------------------------------------------------- social
+// Darks Games overlay (friends / invites / party launch). The SDKs are
+// deferred classic scripts ahead of this module, so `?dg_party` is already
+// stripped from the URL by the time the boot branch below reads `?invite=`.
+
+let currentSnap = null;       // latest online table snapshot (null off-table)
+let soloPresence = null;      // { state, detail } while a sandbox / solo screen is up
+let partyRoomPending = false; // party host: publish the next table as the party room
+
+function publishPresence() {
+  const ov = window.DGOverlay;
+  if (!ov) return;
+  const s = currentSnap;
+  if (!s) {
+    ov.presence.set(soloPresence
+      ? { state: soloPresence.state, detail: String(soloPresence.detail || '').slice(0, 80), join: null }
+      : { state: 'menu', detail: '', join: null });
+    return;
+  }
+  const seated = ['A', 'B'].filter((k) => s.seats?.[k]).length;
+  const state = s.phase === 'LOBBY' ? 'lobby'
+    : s.you === 'spectator' ? 'spectating'
+      : `rack ${s.match?.rackNo ?? 1}`;
+  let detail = `${s.visibility === 'public' ? 'Public' : 'Private'} table`;
+  if (s.rules?.preset) detail += ` · ${s.rules.preset}`;
+  if (s.match?.score) detail += ` · ${s.match.score.A}–${s.match.score.B}`;
+  ov.presence.set({
+    state,
+    detail: detail.slice(0, 80),
+    // The invite token is the join code, verbatim (catalog joinKind "query").
+    // Joinable even with both seats taken: late arrivals spectate / queue.
+    join: { joinCode: s.inviteToken, joinable: true, players: seated, max: 2 },
+  });
+}
+
+// SocketTransport hook: every snapshot / seat update, null on teardown.
+function onSnapshot(snap) {
+  currentSnap = snap;
+  publishPresence();
+  if (partyRoomPending && snap?.inviteToken && window.DGOverlay) {
+    partyRoomPending = false;
+    window.DGOverlay.party.setRoom({ joinCode: snap.inviteToken })
+      .catch((e) => console.warn('[social] party.setRoom failed', e));
+  }
+}
+
+// Overlay "Join" / accepted invite / party room: join in place.
+function socialJoin(j) {
+  let token = j?.joinCode || null;
+  if (!token && j?.joinUrl) {
+    let u;
+    try { u = new URL(j.joinUrl, location.href); } catch { return false; }
+    if (u.origin !== location.origin) return false;
+    token = u.searchParams.get('invite');
+  }
+  if (!token) return false;
+  if (currentSnap?.inviteToken === token) return true;
+  show(gameScreen, { kind: 'online', action: { invite: token }, title: 'Joining table…' });
+  return true;
+}
+
+// Party launch: the host creates a private table; the first snapshot's
+// invite token becomes the party room (members' joinHandler then fires).
+async function onPartyArrived({ isHost, room } = {}) {
+  if (!isHost || room) return;
+  if (!window.DGOverlay) return;
+  // Already waiting alone at a lobby table (e.g. launched from the overlay
+  // while on this page): reuse it instead of tearing it down.
+  const s = currentSnap;
+  if (s?.inviteToken && s.phase === 'LOBBY' && ['A', 'B'].filter((k) => s.seats?.[k]).length < 2) {
+    await window.DGOverlay.party.setRoom({ joinCode: s.inviteToken })
+      .catch((e) => console.warn('[social] party.setRoom failed', e));
+    return;
+  }
+  partyRoomPending = true;
+  show(gameScreen, {
+    kind: 'online',
+    action: { create: { preset: 'standard', visibility: 'private' } },
+    title: 'Party table',
+  });
+}
+
+async function initSocial() {
+  if (!window.DGAccount || !window.DGOverlay) return;
+  await window.DGAccount.init({ game: '8ball' }); // MenuScreen also calls init; it is idempotent
+  await window.DGOverlay.init({ game: '8ball', accent: '#6bd5fa', joinHandler: socialJoin });
+  window.DGOverlay.on('party.arrived', (a) => onPartyArrived(a).catch((e) => console.warn('[social]', e)));
+  publishPresence();
+}
+window.addEventListener('load', () => initSocial().catch((e) => console.warn('[social]', e)), { once: true });
+
+// ------------------------------------------------------------------ boot
 
 const invite = new URLSearchParams(location.search).get('invite');
 if (invite) {
